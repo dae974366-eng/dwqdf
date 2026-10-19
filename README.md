@@ -4,9 +4,12 @@
 إصلاحات موثّقة، واختبارات تشغيل حقيقية تغطي مسار اللعبة كاملاً.
 
 ```
+index.js                     ← نقطة تشغيل البوت (مصححة: clientReady، مسارات، معالجة أخطاء)
 games/rockPaperScissors.js   ← الوحدة الرئيسية (تُستدعى بنفس واجهة execute القديمة)
 test/game.test.js            ← اختبار التدفق الكامل (انضمام/تعادل/فوز/إقصاء/نقاط)
 test/tournament.test.js      ← بطولة من 3 لاعبين عبر مسار الفوز الكامل
+test/member-fallback.test.js ← فحص الرتب عندما يكون message.member فارغاً
+test/bot-index.test.js       ← اختبار index.js: clientReady مرة واحدة، النشاط، الأوامر، SIGTERM
 test/no-canvas.test.js       ← اختبار العمل بدون مكتبة canvas
 test/helpers.js              ← بديل محلي لـ discord.js (رسائل، أزرار، collectors)
 ```
@@ -26,7 +29,49 @@ npm install canvas
 > البوت، بل تعمل اللعبة بالرسائل النصية فقط. (في نسختك القديمة كان `require('canvas')`
 > في أعلى الملف كافياً لإسقاط البوت كله.)
 
-## 2) التركيب داخل البوت
+## 2) نقطة التشغيل `index.js`
+
+انسخ `index.js` إلى جذر البوت (بدل ملفك القديم) وأنشئ `config.json`:
+
+```json
+{
+  "token": "TOKEN",
+  "prefix": "!",
+  "owners": ["123456789012345678"]
+}
+```
+
+ثم: `npm start` (أو `node index.js`).
+
+ما تم إصلاحه في نقطة التشغيل:
+
+| المشكلة القديمة | الإصلاح |
+|---|---|
+| `client.on("ready")` → `DeprecationWarning` في discord.js 14.27+ | `clientReady` مع مستمع `ready` احتياطي وحماية من التنفيذ المزدوج (يعمل على النسخ الأقدم أيضاً) |
+| `fs.readdirSync('./commands')` يعتمد على مجلد التشغيل | `path.join(__dirname, 'commands')` — يعمل من أي مجلد/systemd/PM2 |
+| `require("canvas-constructor/napi-rs")` في الأعلى | محمي بـ try/catch؛ غيابه لم يعد يُسقط البوت |
+| `require("colors")` / `require("ms")` إلزامية | بديل تلقائي عند غيابها |
+| `require("quick.db")` إلزامي | رسالة واضحة + مخزن JSON محلي مؤقت بديل (get/set/delete/add/sub/push/pull) |
+| `utils.times` تُمرَّر كقيمة مجمّدة | getter حي + `setTimes`، فأي تغيير يراه بقية الأوامر |
+| `setMaxListeners(120)` رقم ثابت | يُحسب من عدد الأوامر المحمّلة فعلياً |
+| لا معالجة لأخطاء `client.login` | رسائل واضحة لـ: توكن غير صالح / Privileged Intents / مشكلة شبكة + exit code 1 |
+| لا معالجة لـ `error` / `warn` / `shardError` | مستمعات لكل منها |
+| `process.on('uncaughtException')` يطبع الخطأ فقط | يطبع الـ stack كاملاً بدون إسقاط العملية |
+| لا إيقاف لطيف | `SIGINT` / `SIGTERM` → `client.destroy()` ثم خروج نظيف |
+| `config.json`/التوكن مفقود | رسالة إرشادية بدل انهيار غامض |
+| `message.reply` بدون `catch` عند المنشن | مغلّف |
+| `owners`/`prefix` قد تكون غير معرّفة | افتراضيات آمنة (`prefix = '!'`, قائمة فارغة) |
+| لا تحقق من صحة `activity` القادم من قاعدة البيانات | `normalizeActivity` يصلح النوع/الرابط، وإلا fallback |
+
+> **مهم:** الملف `config.json` مضاف إلى `.gitignore` — لا ترفع التوكن إلى Git أبداً.
+
+### حول الرتب و`message.member`
+
+`message.member` يعتمد على كاش أعضاء السيرفر المملوء عبر **GuildMembers** (Privileged Intent).
+لهذا أصبحت اللعبة تجلب العضو مباشرة عبر `guild.members.fetch()` عند الحاجة، فلا تحتاج
+تفعيل الـ intent لمجرد فحص رتبة `managergamesfr_<guildId>`.
+
+## 3) التركيب داخل البوت
 
 ```js
 const rps = require('./games/rockPaperScissors');
@@ -61,7 +106,7 @@ await api.stopGame(guildId); // إيقاف قسري + تعطيل أزرار ال
 مسار الأصول: البحث يتم في `config.assetsPath` ثم `config.rps.assetsPath` ثم
 `./photo` و `../photo` بالنسبة للملف، وكذلك `./imager`.
 
-## 3) الإعدادات (`config.rps`)
+## 4) الإعدادات (`config.rps`)
 
 | المفتاح | الافتراضي | الوصف |
 |---|---|---|
@@ -85,7 +130,7 @@ const config = {
 };
 ```
 
-## 4) الأصول (اختيارية كلها)
+## 5) الأصول (اختيارية كلها)
 
 `photo/vs.png`، `photo/rps_main.png`، `photo/rock.png`، `photo/paper.png`،
 `photo/scissors.png`، `photo/crown.png`، `photo/bheart.png`، `photo/win.png`،
@@ -97,7 +142,7 @@ const config = {
 - إيموجي الخيارات على الصور ← أشكال متجهية (حجر/ورق/مقص).
 - الأفاتار ← الحرف الأول من الاسم.
 
-## 5) مفاتيح قاعدة البيانات
+## 6) مفاتيح قاعدة البيانات
 
 بدون أي تغيير عن النسخة القديمة:
 
@@ -110,7 +155,7 @@ const config = {
 | `selected_game_emoji_<guildId>.<userId>` + `game_emojis_<guildId>.<userId>` | إيموجي النقاط |
 | `points_<guildId>.<userId>` | تُزاد بمقدار 1 للفائز |
 
-## 6) الأخطاء التي تم إصلاحها
+## 7) الأخطاء التي تم إصلاحها
 
 ### أخطاء تُسقط البوت (أهمها)
 
@@ -170,7 +215,7 @@ const config = {
 - أزرار الانضمام **وأزرار الجولة** تُعطَّل عند الإلغاء/الانتهاء (بدل بقائها فعالة على رسائل ميتة).
 - رسالة الانضمام تعرض أسماء المشاركين أيضاً (وليس العدد فقط).
 
-## 7) الاختبارات
+## 8) الاختبارات
 
 ```bash
 npm install --ignore-scripts   # في بيئة بدون حزم cairo
@@ -186,6 +231,12 @@ npm test
   الفائز النهائي ونقطة واحدة فقط له.
 - `test/channel-optional.test.js`: الأمر يعمل بدون `commandChannel_<guildId>` وبدون أي تحذير
   (الافتراضي الجديد).
+- `test/member-fallback.test.js`: `message.member = null` (بدون GuildMembers intent) —
+  العضو العادي يُرفض والمشرف يبدأ اللعبة عبر `members.fetch`.
+- `test/bot-index.test.js`: يشغّل `index.js` فعلياً مع بديل لـ discord.js يطلق
+  `ready` و`clientReady` معاً: يتحقق من تحميل الأوامر من `__dirname`، تنفيذ معالج
+  الجاهزية مرة واحدة، ضبط النشاط، الإيقاف اللطيف على SIGTERM، ورسائل الخطأ عند غياب
+  `config.json` أو التوكن.
 - `test/no-canvas.test.js`: نفس التدفق مع تعطيل `canvas` بالكامل والتأكد من عدم انهيار
   ومن عدم إرفاق ملفات.
 
@@ -194,7 +245,7 @@ npm test
 بيئة الاختبار تستخدم `@napi-rs/canvas` (بديل متوافق) فقط لأن بناء `canvas` الأصلية يحتاج
 حزم نظام غير متوفرة هنا؛ الكود نفسه لا يعرف شيئاً عنها ويستورد `canvas` كما في الإنتاج.
 
-## 8) استكشاف الأخطاء
+## 9) استكشاف الأخطاء
 
 | الرسالة | السبب |
 |---|---|
@@ -203,4 +254,6 @@ npm test
 | `[RPS] رفضت Discord إيموجي الأزرار` | الإيموجي المخصصة غير متاحة للتطبيق؛ تم التحويل لبدائل |
 | `[RPS] تعذّر تحميل صورة لاعب` | رابط الأفاتار غير متاح/بطيء؛ استُخدم الحرف الأول |
 | `Unknown interaction (10062)` | نقر متأخر على زر قديم — يُتجاهل بصمت |
-| `DeprecationWarning: The ready event has been renamed to clientReady` | تحذير من **ملف البوت الرئيسي** وليس من اللعبة: استبدل `client.on('ready', ...)` و`client.once('ready', ...)` بـ `clientReady` |
+| `DeprecationWarning: The ready event has been renamed to clientReady` | يظهر إذا كان ملفك الرئيسي القديم يستخدم `ready`. نسخة `index.js` هنا تستخدم `clientReady` ولم تعد تصدر هذا التحذير |
+| `Used disallowed intents` عند الدخول | فعّل MESSAGE CONTENT INTENT من Developer Portal → Bot |
+| `TokenInvalid` | التوكن خاطئ أو تم تجديده من Developer Portal |

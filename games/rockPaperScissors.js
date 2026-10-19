@@ -1599,6 +1599,24 @@ function execute(client, dbq, _hasPlay, config, utils) {
 
   /* ----------------------------- الأمر ------------------------------ */
 
+  /**
+   * message.member يعتمد على كاش الأعضاء (GuildMembers intent).
+   * إذا لم يكن الكاش ممتلئاً نجلبه مباشرة قبل فحص الرتبة.
+   */
+  async function resolveMember(message) {
+    if (message.member) return message.member;
+
+    const guild = message.guild;
+    const authorId = message.author && message.author.id;
+    if (!guild || !authorId || !guild.members || typeof guild.members.fetch !== 'function') return null;
+
+    try {
+      return await guild.members.fetch({ user: authorId, force: false });
+    } catch {
+      return null;
+    }
+  }
+
   async function handleGameCommand(message) {
     const guild = message.guild;
     if (!guild) return;
@@ -1618,7 +1636,7 @@ function execute(client, dbq, _hasPlay, config, utils) {
       }
     }
 
-    const member = message.member;
+    const member = await resolveMember(message);
     const managerRole = await dbGet(`managergamesfr_${guildId}`);
     const isOwner = ownerIds.has(String(message.author.id));
     const hasManagerRole = Boolean(

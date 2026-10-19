@@ -278,13 +278,35 @@ function createFakeChannel(id) {
   return new FakeChannel(id);
 }
 
-function createFakeClient(channel, guildId) {
+function createFakeClient(channel, guildId, { resolveMember } = {}) {
   const client = new EventEmitter();
+
   client.channels = {
     cache: new Map([[channel.id, channel]]),
     fetch: async (id) => (id === channel.id ? channel : null)
   };
-  client.guilds = { cache: new Map([[guildId, { id: guildId }]]) };
+
+  const guild = {
+    id: guildId,
+    members: {
+      cache: new Map(),
+      // يحاكي guild.members.fetch({ user }) الذي تستخدمه اللعبة عندما
+      // يكون message.member فارغاً (بدون GuildMembers intent).
+      async fetch(options) {
+        const userId = typeof options === 'object' && options !== null ? options.user : options;
+        const member = typeof resolveMember === 'function' ? await resolveMember(String(userId)) : null;
+        if (!member) {
+          const error = new Error('Unknown Member');
+          error.code = 10007;
+          throw error;
+        }
+        this.cache.set(String(userId), member);
+        return member;
+      }
+    }
+  };
+
+  client.guilds = { cache: new Map([[guildId, guild]]) };
   return client;
 }
 
@@ -389,12 +411,19 @@ async function click(message, user, customId, { settle = 25 } = {}) {
 }
 
 async function runCommand(client, channel, user, content, { member, guildId = 'guild_1' } = {}) {
+  const effectiveMember = member === undefined ? user.member : member;
+  // نستخدم كائن السيرفر الحقيقي من الكاش حتى تتوفر members.fetch وrest.
+  const guild =
+    (client.guilds && client.guilds.cache && typeof client.guilds.cache.get === 'function'
+      ? client.guilds.cache.get(guildId)
+      : null) || { id: guildId };
+
   const message = {
     content,
-    guild: { id: guildId },
+    guild,
     channel,
     author: user,
-    member: member || user.member,
+    member: effectiveMember,
     async reply(payload) {
       return channel.send(payload);
     }

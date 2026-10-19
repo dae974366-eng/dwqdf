@@ -1,0 +1,21 @@
+{
+  "name": "dwqdf-rps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "لعبة حجر/ورق/مقص لـ Discord — discord.js v14 + canvas، متوافقة مع Node 20/22",
+  "main": "games/rockPaperScissors.js",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "check": "node --check games/rockPaperScissors.js",
+    "test": "node test/game.test.js && node test/tournament.test.js && node test/no-canvas.test.js"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "discord.js": "^14.27.0"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.11"
+  }
+}

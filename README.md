@@ -35,6 +35,16 @@ const rps = require('./games/rockPaperScissors');
 rps.execute(client, dbq, has_play, config, utils);
 ```
 
+وإذا كنت على discord.js حديث، غيّر حدث الجاهزية في ملفك الرئيسي لتجنّب تحذير
+`the ready event has been renamed to clientReady`:
+
+```js
+// قبل
+client.once('ready', () => { ... });
+// بعد
+client.once('clientReady', () => { ... });
+```
+
 - `dbq` يجب أن يدعم `get(key)` و `set(key, value)` (نفس المفاتيح القديمة، بدون تغيير).
 - `utils` يُقرأ منه `prefix` (افتراضي `'!'`) و `owners` (مصفوفة آي دي).
 - `config.rps` اختياري لضبط الأرقام (انظر أدناه).
@@ -65,13 +75,13 @@ await api.stopGame(guildId); // إيقاف قسري + تعطيل أزرار ال
 | `maxDraws` | `25` | أقصى عدد تعادلات متتالية |
 | `maxGameMs` | `2700000` | عمر اللعبة الأقصى (45 دقيقة) |
 | `avatarTimeoutMs` | `8000` | مهلة تحميل صورة اللاعب |
-| `requireCommandChannel` | `true` | نفس سلوك النسخة القديمة: يعمل الأمر فقط في قناة `commandChannel_<guildId>` |
+| `requireCommandChannel` | `false` | `false`: يعمل الأمر في كل القنوات. `true`: يعمل فقط في قناة `commandChannel_<guildId>` (سلوك النسخة القديمة) |
 
 مثال:
 
 ```js
 const config = {
-  rps: { roundMs: 20000, maxPlayers: 16, requireCommandChannel: false }
+  rps: { roundMs: 20000, maxPlayers: 16, requireCommandChannel: true }
 };
 ```
 
@@ -155,8 +165,8 @@ const config = {
 
 - **عدم اختيار أي لاعب خلال الجولة = إلغاء اللعبة** بدل اختيار خاسر عشوائياً.
 - **اللاعب الصامت وحده يُقصى** (نفس السلوك السابق) مع رسالة تذكر المتأهل.
-- **`requireCommandChannel`** يحافظ على شرط قنوات الأوامر القديم؛ اجعلها `false` إذا أردت
-  تشغيل اللعبة في كل القنوات.
+- **`requireCommandChannel`** افتراضياً `false` الآن (يعمل في كل القنوات). اجعلها `true`
+  إذا كنت تستخدم نظام قناة أوامر `commandChannel_<guildId>` وتريد تقييد اللعبة عليها.
 - أزرار الانضمام **وأزرار الجولة** تُعطَّل عند الإلغاء/الانتهاء (بدل بقائها فعالة على رسائل ميتة).
 - رسالة الانضمام تعرض أسماء المشاركين أيضاً (وليس العدد فقط).
 
@@ -174,6 +184,8 @@ npm test
   لعبة جديدة بعده، إقصاء اللاعب الصامت، رسالة الفائز، و`points_<guild>.<user> = 1`.
 - `test/tournament.test.js`: بطولة من 3 لاعبين — تأهل الفائز، إقصاء الخاسر، ثم إعلان
   الفائز النهائي ونقطة واحدة فقط له.
+- `test/channel-optional.test.js`: الأمر يعمل بدون `commandChannel_<guildId>` وبدون أي تحذير
+  (الافتراضي الجديد).
 - `test/no-canvas.test.js`: نفس التدفق مع تعطيل `canvas` بالكامل والتأكد من عدم انهيار
   ومن عدم إرفاق ملفات.
 
@@ -186,8 +198,9 @@ npm test
 
 | الرسالة | السبب |
 |---|---|
-| `[RPS] لم يتم ضبط commandChannel_<guildId>` | لم تُضبط قناة الأوامر؛ اضبطها أو `requireCommandChannel: false` |
+| `[RPS] requireCommandChannel = true لكن commandChannel_...` | فعّلت التقييد لكن القناة غير مضبوطة; اضبطها أو أعِدها `false` |
 | `[RPS] تعذّر تحميل مكتبة canvas` | بناء canvas فشل؛ اللعبة تعمل بدون صور |
 | `[RPS] رفضت Discord إيموجي الأزرار` | الإيموجي المخصصة غير متاحة للتطبيق؛ تم التحويل لبدائل |
 | `[RPS] تعذّر تحميل صورة لاعب` | رابط الأفاتار غير متاح/بطيء؛ استُخدم الحرف الأول |
 | `Unknown interaction (10062)` | نقر متأخر على زر قديم — يُتجاهل بصمت |
+| `DeprecationWarning: The ready event has been renamed to clientReady` | تحذير من **ملف البوت الرئيسي** وليس من اللعبة: استبدل `client.on('ready', ...)` و`client.once('ready', ...)` بـ `clientReady` |

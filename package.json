@@ -9,7 +9,7 @@
   },
   "scripts": {
     "check": "node --check games/rockPaperScissors.js",
-    "test": "node test/game.test.js && node test/tournament.test.js && node test/no-canvas.test.js"
+    "test": "node test/game.test.js && node test/tournament.test.js && node test/channel-optional.test.js && node test/no-canvas.test.js"
   },
   "dependencies": {
     "canvas": "^3.2.3",

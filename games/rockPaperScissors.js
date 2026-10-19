@@ -44,9 +44,9 @@ const DEFAULT_SETTINGS = {
   maxGameMs: 45 * 60 * 1000,
   avatarTimeoutMs: 8000,
   avatarCacheSize: 200,
-  // سلوك النسخة الأصلية: لا يعمل الأمر إلا داخل القناة المضبوطة في
-  // commandChannel_<guildId>. اجعلها false للسماح بالأمر في كل القنوات.
-  requireCommandChannel: true
+  // false: يعمل الأمر في كل القنوات (الافتراضي الآن).
+  // true: يعمل فقط داخل commandChannel_<guildId> (سلوك النسخة القديمة).
+  requireCommandChannel: false
 };
 
 const DEFAULT_COLORS = {
@@ -1704,8 +1704,8 @@ function execute(client, dbq, _hasPlay, config, utils) {
       if (!warnedNoCommandChannel) {
         warnedNoCommandChannel = true;
         console.warn(
-          `[RPS] لم يتم ضبط commandChannel_${message.guild.id}، لذلك لن يستجيب الأمر. ` +
-            'اضبط القناة أو اجعل config.rps.requireCommandChannel = false.'
+          `[RPS] requireCommandChannel = true لكن commandChannel_${message.guild.id} غير مضبوط، ` +
+            'لذلك لن يستجيب الأمر. اضبط القناة أو اجعل config.rps.requireCommandChannel = false.'
         );
       }
       return;

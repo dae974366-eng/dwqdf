@@ -5,6 +5,7 @@
 
 ```
 index.js                     ← نقطة تشغيل البوت (مصححة: clientReady، مسارات، معالجة أخطاء)
+helpers/index.js             ← helpers احتياطي (يحلّ خطأ Cannot find module './helpers')
 games/rockPaperScissors.js   ← الوحدة الرئيسية (تُستدعى بنفس واجهة execute القديمة)
 test/game.test.js            ← اختبار التدفق الكامل (انضمام/تعادل/فوز/إقصاء/نقاط)
 test/tournament.test.js      ← بطولة من 3 لاعبين عبر مسار الفوز الكامل
@@ -235,8 +236,9 @@ npm test
   العضو العادي يُرفض والمشرف يبدأ اللعبة عبر `members.fetch`.
 - `test/bot-index.test.js`: يشغّل `index.js` فعلياً مع بديل لـ discord.js يطلق
   `ready` و`clientReady` معاً: يتحقق من تحميل الأوامر من `__dirname`، تنفيذ معالج
-  الجاهزية مرة واحدة، ضبط النشاط، الإيقاف اللطيف على SIGTERM، ورسائل الخطأ عند غياب
-  `config.json` أو التوكن.
+  الجاهزية مرة واحدة، ضبط النشاط، الإيقاف اللطيف على SIGTERM، رسائل الخطأ عند غياب
+  `config.json` أو التوكن، تحميل `helpers` الاختياري، وذكر أسماء الوحدات الناقصة
+  في أوامر المستخدم دون إسقاط البوت.
 - `test/no-canvas.test.js`: نفس التدفق مع تعطيل `canvas` بالكامل والتأكد من عدم انهيار
   ومن عدم إرفاق ملفات.
 
@@ -245,7 +247,55 @@ npm test
 بيئة الاختبار تستخدم `@napi-rs/canvas` (بديل متوافق) فقط لأن بناء `canvas` الأصلية يحتاج
 حزم نظام غير متوفرة هنا؛ الكود نفسه لا يعرف شيئاً عنها ويستورد `canvas` كما في الإنتاج.
 
-## 9) استكشاف الأخطاء
+## 9) خطأ `Cannot find module './helpers'`
+
+```
+Error: Cannot find module './helpers'
+    at Object.<anonymous> (C:\...\games-v2\index.js:15:5)
+```
+
+**السبب:** `index.js` القديم عندك يستدعي `require('./helpers')`، أي أنه يبحث عن
+`helpers/index.js` أو `helpers.js` ولم يجدهما، فيتوقف البوت **قبل** تحميل أي أمر.
+
+**الحل (اختر واحداً):**
+
+1. **استخدم `index.js` المرفق هنا** — لا يستدعي `./helpers` إلزامياً؛ يحمّله إن وُجد
+   فقط، ويُمرّره للأوامر عبر `utils.helpers`:
+
+```js
+npm start
+```
+
+2. **أنشئ مجلد helpers** إن أردت الاحتفاظ بملفك القديم:
+
+```
+games-v2/
+  index.js
+  helpers/
+    index.js      ← انسخ الملف المرفق، أو دوالك الحقيقية
+```
+
+   الملف المرفق `helpers/index.js` يحتوي أدوات جاهزة (`wait`, `randomInt`, `pick`,
+   `shuffle`, `truncate`, `escapeMarkdown`, `formatDuration`, `safeSend`, `safeEdit`,
+   `createEmbed`, `memberHasRole` …)، وأي دالة غير موجودة تُظهر تحذيراً باسمها مرة واحدة
+   بدل أن ينهار البوت بصمت.
+
+3. **أو احذف السطر** `const helpers = require('./helpers');` من ملفك إن لم تكن تستخدمه.
+
+> لا تنسخ `helpers/index.js` المرفق فوق مجلد helpers **حقيقي** عندك — سيستبدل دوالك.
+
+**تحسينات إضافية في `index.js` المرفق:**
+
+- `discord.js` المفقودة تعطي رسالة «npm install» بدل Stack ترويسة غير مفهوم.
+- أي أمر يستدعي وحدة ناقصة يُطبع اسم الوحدة صريحاً، ويكمل البوت تحميل بقية الأوامر:
+
+```
+✗ الملف needs-helpers.js يستدعي وحدة غير مثبتة أو غير موجودة: ../helpers
+   ثبّتها بالأمر: npm install <package> — أو تحقّق من المسار إن كان ملفاً محلياً.
+تم تحميل 1 أمر (فشل 2).
+```
+
+## 10) استكشاف الأخطاء
 
 | الرسالة | السبب |
 |---|---|
@@ -257,3 +307,6 @@ npm test
 | `DeprecationWarning: The ready event has been renamed to clientReady` | يظهر إذا كان ملفك الرئيسي القديم يستخدم `ready`. نسخة `index.js` هنا تستخدم `clientReady` ولم تعد تصدر هذا التحذير |
 | `Used disallowed intents` عند الدخول | فعّل MESSAGE CONTENT INTENT من Developer Portal → Bot |
 | `TokenInvalid` | التوكن خاطئ أو تم تجديده من Developer Portal |
+| `Cannot find module './helpers'` | ملفك القديم يستدعي helpers غير موجود → انظر القسم 9 |
+| `Cannot find module 'X'` داخل أمر | الحزمة X غير مثبتة: `npm install X` (يُطبع اسم الوحدة في السجل) |
+| `Cannot find module 'discord.js'` | نفّذ `npm install` داخل مجلد المشروع |

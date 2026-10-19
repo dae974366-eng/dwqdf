@@ -25,7 +25,18 @@ try {
 const fs = require('fs');
 const path = require('path');
 
-const discord = require('discord.js');
+let discord;
+try {
+  // eslint-disable-next-line global-require
+  discord = require('discord.js');
+} catch (error) {
+  console.error('✗ مكتبة discord.js غير مثبتة.'.red);
+  console.error('  نفّذ داخل مجلد المشروع: npm install');
+  console.error('  أو: npm install discord.js@14');
+  console.error(`  التفاصيل: ${error && error.message ? error.message : error}`);
+  process.exit(1);
+}
+
 const {
   Client,
   GatewayIntentBits,
@@ -266,6 +277,40 @@ const sharedUtils = {
   }
 };
 
+/* -------------------------- helpers (اختياري) ------------------------------ */
+
+/**
+ * بعض ملفات البوت/الأوامر تستدعي require('./helpers').
+ * نحمّله هنا اختيارياً: إن لم يوجد نُكمل مع تحذير واضح بدل انهيار البوت
+ * بخطأ غامض مثل: Error: Cannot find module './helpers'
+ */
+let helpers = {};
+let helpersPath = null;
+
+for (const candidate of [path.join(__dirname, 'helpers'), path.join(__dirname, 'helpers.js')]) {
+  try {
+    // eslint-disable-next-line global-require, import/no-dynamic-require
+    helpers = require(candidate) || {};
+    helpersPath = candidate;
+    break;
+  } catch (error) {
+    const notFound = error && error.code === 'MODULE_NOT_FOUND' && String(error.message).includes('helpers');
+    if (!notFound) {
+      console.error(`✗ خطأ داخل ${candidate}:`.red, error);
+    }
+  }
+}
+
+if (helpersPath) {
+  console.log(`تم تحميل helpers: ${helpersPath}`.cyan);
+} else {
+  console.warn('⚠️ لم يتم العثور على helpers (helpers/index.js أو helpers.js).'.yellow);
+  console.warn('   إذا كان index.js القديم يستدعي require("./helpers") فسيظهر خطأ MODULE_NOT_FOUND.');
+  console.warn('   الحل: انسخ helpers/index.js الموجود في هذا المستودع، أو احذف سطر الـ require.');
+}
+
+sharedUtils.helpers = helpers;
+
 /* ---------------------------- تحميل الأوامر -------------------------------- */
 
 const commandsDir = path.join(__dirname, 'commands');
@@ -292,7 +337,17 @@ if (fs.existsSync(commandsDir)) {
       loadedCommands += 1;
     } catch (error) {
       failedCommands += 1;
-      console.error(`✗ خطأ أثناء تحميل ملف الأمر ${file}:`.red, error);
+
+      const missing = error && error.code === 'MODULE_NOT_FOUND'
+        ? String(error.message).match(/Cannot find module '([^']+)'/i)
+        : null;
+
+      if (missing) {
+        console.error(`✗ الملف ${file} يستدعي وحدة غير مثبتة أو غير موجودة: ${missing[1]}`.red);
+        console.error('   ثبّتها بالأمر: npm install <package> — أو تحقّق من المسار إن كان ملفاً محلياً.');
+      } else {
+        console.error(`✗ خطأ أثناء تحميل ملف الأمر ${file}:`.red, error);
+      }
     }
   }
 
@@ -312,7 +367,9 @@ try {
   // eslint-disable-next-line global-require, import/no-dynamic-require
   require(path.join(__dirname, 'helpers', 'gif-shop-system'));
 } catch (error) {
-  if (!error || error.code !== 'MODULE_NOT_FOUND') {
+  if (error && error.code === 'MODULE_NOT_FOUND') {
+    // طبيعي: النظام الإضافي غير موجود في هذا المشروع.
+  } else {
     console.error('✗ خطأ في تحميل helpers/gif-shop-system:'.red, error);
   }
 }

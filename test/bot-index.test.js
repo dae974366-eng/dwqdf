@@ -113,6 +113,57 @@ function runBot() {
   return { child, get stdout() { return stdout; }, get stderr() { return stderr; } };
 }
 
+/**
+ * يشغّل نسخة من index.js وينتظر ظهور علامة معينة في المخرجات،
+ * ثم يوقفها بـ SIGTERM ويعيد المخرجات ورمز الخروج.
+ */
+function runBot(dir, { marker = 'TEST_DONE', timeout = 15000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(dir, 'index.js')], {
+      cwd: os.tmpdir(),
+      env: { ...process.env, NODE_PATH: path.join(TMP, 'node_modules') },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+
+    const finish = (code, signal) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      resolve({ code, signal, stdout, stderr });
+    };
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    const poll = setInterval(() => {
+      if (stdout.includes(marker) && !done) {
+        clearInterval(poll);
+        child.kill('SIGTERM');
+      }
+    }, 20);
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      if (!done) {
+        done = true;
+        clearInterval(poll);
+        reject(new Error(`انتهت المهلة بانتظار "${marker}". stdout:\n${stdout}\nstderr:\n${stderr}`));
+      }
+    }, timeout);
+
+    child.once('exit', (code, signal) => finish(code, signal));
+  });
+}
+
 /** يشغّل نسخة من index.js وينتظر خروجها، ويعيد stdout/stderr ورمز الخروج. */
 function runAndExit(dir, { timeout = 15000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -141,6 +192,78 @@ function runAndExit(dir, { timeout = 15000 } = {}) {
       resolve({ code, signal, stdout, stderr });
     });
   });
+}
+
+/**
+ * يتأكد من أن غياب مجلد helpers لا يمنع الإقلاع، وأن الأوامر التي تستدعي
+ * وحدات ناقصة تُبلّغ باسم الوحدة بدل إسقاط البوت.
+ */
+async function checkOptionalHelpers() {
+  // (أ) وجود helpers: يُحمّل ويُمرَّر إلى الأوامر
+  const withHelpers = fs.mkdtempSync(path.join(os.tmpdir(), 'rps-withhelpers-'));
+  fs.copyFileSync(path.join(REPO_ROOT, 'index.js'), path.join(withHelpers, 'index.js'));
+  fs.copyFileSync(path.join(TMP, 'config.json'), path.join(withHelpers, 'config.json'));
+  fs.cpSync(path.join(REPO_ROOT, 'helpers'), path.join(withHelpers, 'helpers'), { recursive: true });
+  fs.mkdirSync(path.join(withHelpers, 'commands'), { recursive: true });
+  fs.writeFileSync(
+    path.join(withHelpers, 'commands', 'helper-user.js'),
+    `'use strict';
+module.exports = { execute(client, dbq, has_play, config, utils) {
+  const h = utils.helpers || {};
+  console.log('[helper-user] hasWait=' + (typeof h.wait === 'function'));
+  console.log('[helper-user] escaped=' + h.escapeMarkdown('a*b_c'));
+  console.log('HELPERS_DONE');
+} };
+`
+  );
+
+  const withResult = await runBot(withHelpers, { marker: 'HELPERS_DONE' });
+  assert.ok(withResult.stdout.includes('تم تحميل helpers'), `لم يُحمّل helpers:\n${withResult.stdout}`);
+  assert.ok(withResult.stdout.includes('[helper-user] hasWait=true'), 'utils.helpers.wait غير متاح');
+  assert.ok(withResult.stdout.includes('[helper-user] escaped=abc'), 'escapeMarkdown لا يعمل');
+
+  // (ب) غياب helpers + أمر يستدعي وحدة ناقصة: البوت يقلع ويطبع اسم الوحدة
+  const withoutHelpers = fs.mkdtempSync(path.join(os.tmpdir(), 'rps-nohelpers-'));
+  fs.copyFileSync(path.join(REPO_ROOT, 'index.js'), path.join(withoutHelpers, 'index.js'));
+  fs.copyFileSync(path.join(TMP, 'config.json'), path.join(withoutHelpers, 'config.json'));
+
+  const badCommands = path.join(withoutHelpers, 'commands');
+  fs.mkdirSync(badCommands, { recursive: true });
+  fs.writeFileSync(
+    path.join(badCommands, 'needs-helpers.js'),
+    `'use strict';
+require('../helpers');
+module.exports = { execute() {} };
+`
+  );
+  fs.writeFileSync(
+    path.join(badCommands, 'needs-package.js'),
+    `'use strict';
+require('package-that-does-not-exist-xyz');
+module.exports = { execute() {} };
+`
+  );
+  fs.writeFileSync(
+    path.join(badCommands, 'fine.js'),
+    `'use strict';
+module.exports = { execute() { console.log('FINE_COMMAND_LOADED'); } };
+`
+  );
+
+  const withoutResult = await runBot(withoutHelpers, { marker: '[stub] both ready events emitted' });
+  // التحذيرات تُكتب على stderr، والمخرجات العادية على stdout.
+  const combined = `${withoutResult.stdout}\n${withoutResult.stderr}`;
+
+  assert.ok(combined.includes('لم يتم العثور على helpers'), `يجب التحذير عند غياب helpers:\n${combined}`);
+  assert.ok(combined.includes('../helpers'), `يجب ذكر الوحدة الناقصة ../helpers:\n${combined}`);
+  assert.ok(
+    combined.includes('package-that-does-not-exist-xyz'),
+    `يجب ذكر الحزمة الناقصة:\n${combined}`
+  );
+  assert.ok(withoutResult.stdout.includes('FINE_COMMAND_LOADED'), 'الأمر السليم يجب أن يُحمّل رغم فشل الآخرين');
+  assert.ok(withoutResult.stdout.includes('فشل 2'), `عدّاد الفشل غير صحيح:\n${withoutResult.stdout}`);
+
+  console.log('✓ index.js: helpers اختياري، ورسائل واضحة للوحدات الناقصة');
 }
 
 async function checkStartupErrors() {
@@ -198,24 +321,9 @@ module.exports = {
 
   writeStubDiscord();
 
-  const bot = runBot();
-  const started = Date.now();
-
-  while (!bot.stdout.includes('TEST_DONE')) {
-    if (Date.now() - started > 15000) {
-      bot.child.kill('SIGKILL');
-      throw new Error(`انتهت المهلة. stdout:\n${bot.stdout}\nstderr:\n${bot.stderr}`);
-    }
-    // eslint-disable-next-line no-await-in-loop
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-
-  const exited = new Promise((resolve) => bot.child.once('exit', (code, signal) => resolve({ code, signal })));
-  bot.child.kill('SIGTERM');
-  const result = await exited;
-
-  const out = bot.stdout;
-  const err = bot.stderr;
+  const result = await runBot(TMP);
+  const out = result.stdout;
+  const err = result.stderr;
 
   assert.ok(out.includes('[sample] loaded prefix=! times=false owners=100'), `لم يُحمّل الأمر من __dirname:\n${out}`);
   assert.ok(out.includes('[sample] getter times=777'), 'utils.times يجب أن يقرأ القيمة المحدثة');
@@ -237,6 +345,7 @@ module.exports = {
   console.log('✓ index.js: تحميل الأوامر، clientReady مرة واحدة، النشاط، والإيقاف اللطيف');
   console.log(`  (تم الاختبار في ${TMP})`);
 
+  await checkOptionalHelpers();
   await checkStartupErrors();
 }
 
